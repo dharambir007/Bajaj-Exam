@@ -1,151 +1,189 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config();
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MY_EMAIL = process.env.EMAIL;
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
+
 
 app.use(cors());
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json());
 
-// check prime
-const isPrime = (n) => {
-    if (n < 2) return false;
-    for (let i = 2; i * i <= n; i++) {
-        if (n % i === 0) return false;
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+
+function generateFibonacci(n) {
+  if (n <= 0) return [];
+  if (n === 1) return [0];
+  const fib = [0, 1];
+  for (let i = 2; i < n; i++) {
+    fib.push(fib[i - 1] + fib[i - 2]);
+  }
+  return fib;
+}
+
+function filterPrimes(arr) {
+  const isPrime = (num) => {
+    if (num < 2) return false;
+    for (let i = 2; i <= Math.sqrt(num); i++) {
+      if (num % i === 0) return false;
     }
     return true;
-};
+  };
+  return arr.filter(isPrime);
+}
 
-// gcd and lcm
-const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
-const lcm = (a, b) => (a * b) / gcd(a, b);
+function calculateLCM(arr) {
+  const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+  const lcm = (a, b) => (a * b) / gcd(a, b);
+  return arr.reduce((acc, val) => lcm(acc, val));
+}
 
-// post route
+function calculateHCF(arr) {
+  const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+  return arr.reduce((acc, val) => gcd(acc, val));
+}
+
+async function getAIResponse(question) {
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const result = await model.generateContent(question);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error('AI Error:', error);
+    throw new Error('AI service unavailable');
+  }
+}
+
+
 app.post('/bfhl', async (req, res) => {
-    try {
-        const body = req.body;
+  try {
+    const { fibonacci, prime, lcm, hcf, AI } = req.body;
 
-        if (!body || typeof body !== "object") {
-            return res.status(400).json({ is_success: false });
-        }
 
-        const keys = Object.keys(body);
-        if (keys.length !== 1) {
-            return res.status(400).json({ is_success: false });
-        }
-
-        const key = keys[0];
-        let result;
-
-        // fibonacci
-        if (key === 'fibonacci') {
-            const n = body.fibonacci;
-            if (!Number.isInteger(n) || n < 0)
-                return res.status(400).json({ is_success: false });
-
-            const fib = [0, 1];
-            for (let i = 2; i < n; i++) {
-                fib[i] = fib[i - 1] + fib[i - 2];
-            }
-            result = fib.slice(0, n);
-        }
-
-        // prime filter
-        else if (key === 'prime') {
-            const arr = body.prime;
-            if (!Array.isArray(arr))
-                return res.status(400).json({ is_success: false });
-
-            result = arr.filter(x => Number.isInteger(x) && isPrime(x));
-        }
-
-        // lcm
-        else if (key === 'lcm') {
-            const arr = body.lcm;
-            if (!Array.isArray(arr) || arr.length === 0)
-                return res.status(400).json({ is_success: false });
-
-            result = arr.reduce((a, b) => lcm(a, b));
-        }
-
-        // hcf
-        else if (key === 'hcf') {
-            const arr = body.hcf;
-            if (!Array.isArray(arr) || arr.length === 0)
-                return res.status(400).json({ is_success: false });
-
-            result = arr.reduce((a, b) => gcd(a, b));
-        }
-
-        // ai using gemini
-        else if (key === 'AI') {
-            const question = body.AI;
-
-            if (typeof question !== 'string' || question.trim().length === 0) {
-                return res.status(400).json({ is_success: false, message: "AI must be a non-empty string" });
-            }
-
-            try {
-                const geminiRes = await axios.post(
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
-                    {
-                        contents: [{
-                            parts: [{ text: question + '. Answer in ONE word only.' }]
-                        }]
-                    }
-                );
-
-                let answer = geminiRes?.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'Unknown';
-                answer = answer.trim().split(/\s+/)[0];
-
-                return res.json({
-                    is_success: true,
-                    official_email: MY_EMAIL,
-                    data: answer
-                });
-            } catch (err) {
-                console.error("Gemini error:", err.response?.data || err.message);
-                return res.status(500).json({
-                    is_success: false,
-                    message: "AI service failed"
-                });
-            }
-        }
-
-        // invalid key
-        else {
-            return res.status(400).json({ is_success: false });
-        }
-
-        // send back result
-        return res.status(200).json({
-            is_success: true,
-            official_email: MY_EMAIL,
-            data: result
-        });
-
-    } catch (err) {
-        console.error("Error:", err.message);
-        return res.status(500).json({
-            is_success: false,
-            message: "Internal server error"
-        });
+    if (!fibonacci && !prime && !lcm && !hcf && !AI) {
+      return res.status(400).json({
+        is_success: false,
+        official_email: process.env.OFFICIAL_EMAIL,
+        data: null,
+        error: 'At least one input is required'
+      });
     }
+
+    let data = {};
+
+  
+    if (fibonacci !== undefined) {
+      if (typeof fibonacci !== 'number' || fibonacci < 0) {
+        return res.status(400).json({
+          is_success: false,
+          official_email: process.env.OFFICIAL_EMAIL,
+          data: null,
+          error: 'Fibonacci input must be a non-negative integer'
+        });
+      }
+      data = generateFibonacci(fibonacci);
+    }
+
+    if (prime !== undefined) {
+      if (!Array.isArray(prime)) {
+        return res.status(400).json({
+          is_success: false,
+          official_email: process.env.OFFICIAL_EMAIL,
+          data: null,
+          error: 'Prime input must be an array'
+        });
+      }
+      data = filterPrimes(prime);
+    }
+
+    if (lcm !== undefined) {
+      if (!Array.isArray(lcm) || lcm.length === 0) {
+        return res.status(400).json({
+          is_success: false,
+          official_email: process.env.OFFICIAL_EMAIL,
+          data: null,
+          error: 'LCM input must be a non-empty array'
+        });
+      }
+      data = calculateLCM(lcm);
+    }
+
+    if (hcf !== undefined) {
+      if (!Array.isArray(hcf) || hcf.length === 0) {
+        return res.status(400).json({
+          is_success: false,
+          official_email: process.env.OFFICIAL_EMAIL,
+          data: null,
+          error: 'HCF input must be a non-empty array'
+        });
+      }
+      data = calculateHCF(hcf);
+    }
+
+    if (AI !== undefined) {
+      if (typeof AI !== 'string' || AI.trim() === '') {
+        return res.status(400).json({
+          is_success: false,
+          official_email: process.env.OFFICIAL_EMAIL,
+          data: null,
+          error: 'AI input must be a non-empty string'
+        });
+      }
+      data = await getAIResponse(AI);
+    }
+
+ 
+    res.status(200).json({
+      is_success: true,
+      official_email: process.env.OFFICIAL_EMAIL,
+      data: data
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({
+      is_success: false,
+      official_email: process.env.OFFICIAL_EMAIL,
+      data: null,
+      error: 'Internal server error'
+    });
+  }
 });
 
-// health check
-app.get('/health', (req, res) => {
-    res.json({
-        is_success: true,
-        official_email: MY_EMAIL
-    });
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Bajaj Finserv Health API',
+    status: 'Running',
+    endpoints: {
+      health: 'GET /health',
+      bfhl: 'POST /bfhl'
+    },
+    usage: {
+      fibonacci: 'POST /bfhl with body: {"fibonacci": 7}',
+      prime: 'POST /bfhl with body: {"prime": [2,4,7,9,11]}',
+      lcm: 'POST /bfhl with body: {"lcm": [12,18,24]}',
+      hcf: 'POST /bfhl with body: {"hcf": [24,36,60]}',
+      ai: 'POST /bfhl with body: {"AI": "Your question here"}'
+    }
+  });
 });
+
+
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    is_success: true,
+    official_email: process.env.OFFICIAL_EMAIL
+  });
+});
+
 
 app.listen(PORT, () => {
-    console.log("Server running on port " + PORT);
+  console.log(`Server running on port ${PORT}`);
 });
+
+module.exports = app;
