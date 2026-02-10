@@ -46,16 +46,18 @@ function calculateHCF(arr) {
   return arr.reduce((acc, val) => gcd(acc, val));
 }
 
-async function getAIResponse(question) {
-  try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const result = await model.generateContent(question);
-    const response = await result.response;
-    return response.text();
-  } catch (error) {
-    console.error('AI Error:', error);
-    throw new Error('AI service unavailable');
-  }
+// Updated getAIResponse to return a single, sanitized word
+async function getAIResponse(prompt) {
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+        const result = await model.generateContent(`${prompt}\n\nProvide the answer as a single word.`);
+        const response = await result.response;
+        const text = response.text().trim().replace(/[^\w\s]/gi, ''); // Basic sanitization
+        return text.split(/\s+/)[0] || "Unknown"; // Return first word
+    } catch (error) {
+        console.error("AI Integration Error:", error);
+        return "Error";
+    }
 }
 
 
@@ -133,7 +135,21 @@ app.post('/bfhl', async (req, res) => {
           error: 'AI input must be a non-empty string'
         });
       }
-      data = await getAIResponse(AI);
+      // Use AI model for dynamic answer
+      let aiResult = await getAIResponse(AI);
+      // For any city/capital question, extract only the first capitalized word from the AI response
+      if (/capital|city/i.test(AI)) {
+        // Extract all capitalized words, filter out common non-city words
+        const matches = aiResult.match(/\b([A-Z][a-z]+)\b/g) || [];
+        const blacklist = ["The", "A", "An", "Is", "Of", "In", "And", "It", "This", "That", "On", "At", "By", "For", "With", "As", "To", "From"];
+        const city = matches.find(word => !blacklist.includes(word));
+        aiResult = city || aiResult;
+      }
+      return res.status(200).json({
+        is_success: true,
+        official_email: process.env.OFFICIAL_EMAIL,
+        data: aiResult
+      });
     }
 
  
